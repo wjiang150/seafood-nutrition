@@ -1,0 +1,825 @@
+---
+title: "CS634 Project"
+author: "Wenrui Jiang"
+date: "2023-12-04"
+output: pdf_document
+---
+install packages
+```{r,include=False}
+install.packages(c("dplyr", "ggplot2", "tidyr", "tidyverse", "rpart", "rpart.plot", 
+                   "tree", "caret", "glmnet", "randomForest", "randomForestExplainer", 
+                   "nnet", "gbm", "e1071","irr", "reshape2"))
+```
+
+use library 
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(tidyverse)
+library(rpart)
+library(rpart.plot)
+library(tree)
+library(caret)
+library(glmnet)
+library(randomForest)
+library(randomForestExplainer)
+library(nnet)
+library(gbm)
+library(e1071)
+library(irr)
+library(reshape2)
+library(stats)
+```
+
+read the data and combine them into one
+```{r,message=FALSE,warning=FALSE}
+df1 <- read_csv("Nhanes_2005_2006.csv")
+df2 <- read_csv("Nhanes_2007_2008.csv")
+df3 <- read_csv("Nhanes_2009_2010.csv")
+df4 <- read_csv("Nhanes_2011_2012.csv")
+df5 <- read_csv("Nhanes_2013_2014.csv")
+df <- bind_rows(df1, df2, df3, df4, df5)
+```
+
+clean the row and columns
+```{r}
+cleaned_df <- df[!is.na(df$DRD350B) & !is.na(df$DRD350C), ]
+columnIndex <- which(names(cleaned_df) == "DRD370UQ")
+cleaned_df <- cleaned_df[, 1:columnIndex]
+cleaned_df <- replace(cleaned_df, is.na(cleaned_df), 0)
+```
+
+combine the quantity of the seafood
+```{r}
+seafoodq <- data.frame(cleaned_df$SEQN)
+seafoodq$shellfish <- cleaned_df$DRD350AQ + cleaned_df$DRD350EQ + cleaned_df$DRD350FQ + cleaned_df$DRD350GQ + cleaned_df$DRD350IQ
+seafoodq$shrimp_crab <- cleaned_df$DRD350CQ + cleaned_df$DRD350DQ + cleaned_df$DRD350HQ
+seafoodq$seafish <- cleaned_df$DRD370BQ + cleaned_df$DRD370EQ + cleaned_df$DRD370FQ + cleaned_df$DRD370GQ + cleaned_df$DRD370HQ + cleaned_df$DRD370JQ + cleaned_df$DRD370KQ + cleaned_df$DRD370NQ
+seafoodq$freshwaterfish <- cleaned_df$DRD370CQ + cleaned_df$DRD370DQ + cleaned_df$DRD370IQ + cleaned_df$DRD370MQ + cleaned_df$DRD370OQ + cleaned_df$DRD370RQ
+```
+
+Combine the seafood with response variable data set
+```{r,message=FALSE}
+sub_df <- cleaned_df[c("SEQN","DR1TKCAL","DR1TPROT","DR1TCARB","DR1TTFAT","DR1TFIBE","DR1TIRON","DR1TCALC","DR1TZINC","DR1TPOTA")]
+sub_df<-cbind(sub_df,seafoodq[,2:5])
+```
+
+Change the column name of data set and calculate the proportion of energy
+```{r,warning=FALSE}
+names(sub_df)[names(sub_df) == c("SEQN","DR1TKCAL","DR1TPROT","DR1TCARB","DR1TTFAT","DR1TFIBE","DR1TIRON","DR1TCALC","DR1TZINC","DR1TPOTA")]<-c("ID","Energy","Protein","Carbohydrate","Fat","Fiber","Iron","Calcium","Zinc","Potassium")
+sub_df$Protein_kcal <- sub_df$Protein * 4
+sub_df$Carbohydrate_kcal <- sub_df$Carbohydrate * 4
+sub_df$Fat_kcal <- sub_df$Fat * 9
+sub_df$Protein_p <- (sub_df$Protein_kcal/sub_df$Energy)*100
+sub_df$Carbohydrate_p <- (sub_df$Carbohydrate_kcal/sub_df$Energy)*100
+sub_df$Fat_p <- (sub_df$Fat_kcal/sub_df$Energy)*100
+sub_df<- na.omit(sub_df)
+```
+
+
+
+
+And the class label base on the daily intake
+Protein
+```{r}
+sub_df$Protein_balance <- "Balance"
+for (i in 1:nrow(sub_df)){ 
+   if (sub_df$Protein_p[i] < 10) {
+    sub_df$Protein_balance[i]<- "Low"
+   }
+   if (sub_df$Protein_p[i] > 25) {
+    sub_df$Protein_balance[i]<- "High"
+  }
+}
+```
+
+Carbohydrate
+```{r}
+sub_df$Carbohydrate_balance <- "Balance"
+for (i in 1:nrow(sub_df)){ 
+   if (sub_df$Carbohydrate_p[i] < 45) {
+    sub_df$Carbohydrate_balance[i]<- "Low"
+   }
+   if (sub_df$Carbohydrate_p[i] > 65) {
+    sub_df$Carbohydrate_balance[i]<- "High"
+  }
+}
+```
+
+Fat 
+```{r}
+sub_df$Fat_balance <-"Balance"
+for (i in 1:nrow(sub_df)){ 
+   if (sub_df$Fat_p[i] < 25) {
+    sub_df$Fat_balance[i]<- "Low"
+   }
+   if (sub_df$Fat_p[i] > 35) {
+    sub_df$Fat_balance[i]<- "High"
+  }
+}
+```
+
+Fiber
+```{r}
+sub_df$Fiber_balance <- "Balance"
+for (i in 1:nrow(sub_df)){ 
+   if (sub_df$Fiber[i] < 10) {
+    sub_df$Fiber_balance[i]<- "Low"
+   }
+   if (sub_df$Fiber[i] > 40) {
+    sub_df$Fiber_balance[i]<- "High"
+  }
+}
+```
+
+Iron
+```{r}
+sub_df$Iron_balance <- "Balance"
+for (i in 1:nrow(sub_df)){ 
+   if (sub_df$Iron[i] < 10) {
+    sub_df$Iron_balance[i]<- "Low"
+   }
+   if (sub_df$Iron[i] > 40) {
+    sub_df$Iron_balance[i]<- "High"
+  }
+}
+```
+
+Calcium
+```{r}
+sub_df$Calcium_balance <-"Balance"
+for (i in 1:nrow(sub_df)){ 
+   if (sub_df$Calcium[i] < 800) {
+    sub_df$Calcium_balance[i]<- "Low"
+   }
+   if (sub_df$Calcium[i] > 2500) {
+    sub_df$Calcium_balance[i]<- "High"
+  }
+}
+```
+
+Potassium
+```{r}
+sub_df$Potassium_balance <-"Balance"
+for (i in 1:nrow(sub_df)){ 
+   if (sub_df$Potassium[i] < 2000) {
+    sub_df$Potassium_balance[i]<- "Low"
+   }
+   if (sub_df$Potassium[i] > 3500) {
+    sub_df$Potassium_balance[i]<- "High"
+  }
+}
+```
+
+Zinc
+```{r}
+sub_df$Zinc_balance <-"Balance"
+for (i in 1:nrow(sub_df)){ 
+   if (sub_df$Zinc[i] < 8) {
+    sub_df$Zinc_balance[i]<- "Low"
+   }
+   if (sub_df$Zinc[i] > 20) {
+    sub_df$Zinc_balance[i]<- "High"
+  }
+}
+```
+
+Graph of energy intake 
+```{r}
+data_long <- tidyr::gather(sub_df, key = "variable", value = "class", Protein_balance, Carbohydrate_balance, Fat_balance)
+class_percentages <- prop.table(table(data_long$variable, data_long$class), margin = 1) * 100
+ggplot(data = data_long, aes(x = variable, fill = class)) +
+  geom_bar(position = "fill") + labs(title = "Class Distribution for Different type of energy intake",
+  x = "Intake Variable", y = "Ratio") +
+  theme_minimal()
+```
+
+Graph of trace element 
+```{r}
+data_long <- tidyr::gather(sub_df, key = "variable", value = "class", Zinc_balance, Potassium_balance, Iron_balance,Calcium_balance)
+class_percentages <- prop.table(table(data_long$variable, data_long$class), margin = 1) * 100
+ggplot(data = data_long, aes(x = variable, fill = class)) +
+  geom_bar(position = "fill") + labs(title = "Class Distribution for Different type of energy intake",
+  x = "Intake Variable", y = "Ratio") +
+  theme_minimal()
+```
+
+
+
+```{r}
+double_data <- sub_df[c("Fiber_balance","Protein_balance","Fat_balance", "Carbohydrate_balance")]
+convert_to_numeric <- function(x) {
+  as.numeric(factor(x, levels = c("High", "Low", "Balance")))}
+df_numeric <- data.frame(lapply(double_data, convert_to_numeric))
+df_numeric$shellfish <- sub_df$shellfish
+df_numeric$shrimp_crab <- sub_df$shrimp_crab
+df_numeric$seafish <- sub_df$seafish
+df_numeric$freshwaterfish <- sub_df$freshwaterfish
+
+cor(df_numeric)
+cor_matrix <- cor(df_numeric, use = "complete.obs")
+melted_cor_matrix <- melt(cor_matrix)
+ggplot(data = melted_cor_matrix, aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+  theme_minimal() +
+  coord_fixed() +
+  xlab("") +
+  ylab("") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+double_data <- sub_df[c("Zinc_balance","Calcium_balance","Iron_balance", "Potassium_balance")]
+convert_to_numeric <- function(x) {
+  as.numeric(factor(x, levels = c("High", "Low", "Balance")))}
+df_numeric <- data.frame(lapply(double_data, convert_to_numeric))
+df_numeric$shellfish <- sub_df$shellfish
+df_numeric$shrimp_crab <- sub_df$shrimp_crab
+df_numeric$seafish <- sub_df$seafish
+df_numeric$freshwaterfish <- sub_df$freshwaterfish
+
+cor(df_numeric)
+cor_matrix <- cor(df_numeric, use = "complete.obs")
+melted_cor_matrix <- melt(cor_matrix)
+ggplot(data = melted_cor_matrix, aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+  theme_minimal() +
+  coord_fixed() +
+  xlab("") +
+  ylab("") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+
+Separate data set into training and testing data set by 8:2 ratio
+```{r}
+train_indices <- sample(1:nrow(sub_df), 0.8 * nrow(sub_df))
+train_data <- sub_df[train_indices, ]
+test_data <- sub_df[-train_indices, ]
+```
+
+
+
+protein -- Random Forest 
+```{r}
+train_data$Protein_balance<-as.factor(train_data$Protein_balance)
+test_data$Protein_balance<-as.factor(test_data$Protein_balance)
+rf_model_Protein<- randomForest(Protein_balance ~ shellfish+shrimp_crab+seafish+freshwaterfish,data=train_data,ntree = 50, mtry = 4)
+predictions_Protein <- predict(rf_model_Protein, newdata = test_data)
+conf_matrix_Protein <- confusionMatrix(predictions_Protein, test_data$Protein_balance)
+print(conf_matrix_Protein)
+accuracy_Protein <- conf_matrix_Protein$overall["Accuracy"]
+print(paste("Accuracy:", accuracy_Protein))
+```
+
+protein -- Random Forest plot
+```{r,warning=FALSE}
+var_imp <- randomForest::importance(rf_model_Protein)
+var_imp_df <- data.frame(Variables = rownames(var_imp), Importance = var_imp[, 1])
+
+ggplot(var_imp_df, aes(x = reorder(Variables, -Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Variable Importance Plot") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+protein --- logistic regression 
+```{r}
+Protein_logistic_model <- multinom(Protein_balance~shellfish+shrimp_crab+seafish+freshwaterfish, data = train_data)
+Protein_logistic_predictions <- predict(Protein_logistic_model, newdata = test_data)
+Protein_conf_matrix_logistic <- confusionMatrix(Protein_logistic_predictions, test_data$Protein_balance)
+print(Protein_conf_matrix_logistic)
+summary(Protein_logistic_model)
+```
+
+protein --- logistic regression (adjust the class weight)
+```{r}
+protein_weight_value <- table(sub_df$Protein_balance)
+train_data$Protein_weight <- nrow(sub_df) / (3*protein_weight_value[1])
+for (i in 1:nrow(train_data)){ 
+   if (train_data$Protein_balance[i] == "High") {
+    train_data$Protein_weight[i]<- nrow(sub_df) / (3*protein_weight_value[2])
+   }
+   if (train_data$Protein_balance[i] == "Low") {
+    train_data$Protein_weight[i]<- nrow(sub_df) / (3*protein_weight_value[3])
+  }
+} 
+Protein_logistic_weight_model <- multinom(Protein_balance~shrimp_crab+seafish+freshwaterfish, data = train_data, weight =train_data$Protein_weight)
+Protein_logistic_weight_predictions <- predict(Protein_logistic_weight_model, newdata = test_data)
+Protein_conf_matrix_logistic_weight <- confusionMatrix(Protein_logistic_weight_predictions, test_data$Protein_balance)
+print(Protein_conf_matrix_logistic_weight)
+summary(Protein_logistic_weight_model)
+```
+
+Protein --- Naive Bayes
+```{r}
+Protein_naive_bayes <- naiveBayes(Protein_balance ~ shellfish+shrimp_crab+seafish+freshwaterfish,data = train_data)
+Protein_nb_predictions <- predict(Protein_naive_bayes, newdata = test_data)
+Protein_nb_conf_matrix <- confusionMatrix(Protein_nb_predictions, test_data$Protein_balance)
+print(Protein_nb_conf_matrix)
+Protein_naive_bayes
+```
+
+protein --- Support Vector Machine 
+```{r}
+class_weights <- c(Balance = 1, High = 10, Low = 7)
+linear_svm_model <- svm(Protein_balance ~ shellfish+shrimp_crab+seafish+freshwaterfish, data = train_data, kernel = "radial", type = "C-classification",class.weights = class_weights)
+linear_svm_predictions <- predict(linear_svm_model, newdata = test_data)
+linear_svm_accuracy <- sum(linear_svm_predictions == test_data$Protein_balance) / nrow(test_data)
+confusionMatrix(linear_svm_predictions,test_data$Protein_balance)
+print(linear_svm_accuracy)
+```
+
+
+
+Carbohydrate --- Random Forest
+```{r}
+train_data$Carbohydrate_balance<-as.factor(train_data$Carbohydrate_balance)
+test_data$Carbohydrate_balance<-as.factor(test_data$Carbohydrate_balance)
+rf_model_Carbohydrate <- randomForest(Carbohydrate_balance ~ shellfish + shrimp_crab + seafish + freshwaterfish, data=train_data,ntree = 50, mtry = 4)
+predictions_Carbohydrate <- predict(rf_model_Carbohydrate, newdata = test_data)
+conf_matrix_Carbohydrate <- confusionMatrix(predictions_Carbohydrate, test_data$Carbohydrate_balance)
+rf_model_Carbohydrate
+print(conf_matrix_Carbohydrate)
+```
+
+Carbohydrate -- Random Forest plot
+```{r,warning=FALSE}
+var_imp <- randomForest::importance(rf_model_Carbohydrate)
+var_imp_df <- data.frame(Variables = rownames(var_imp), Importance = var_imp[, 1])
+
+ggplot(var_imp_df, aes(x = reorder(Variables, -Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Variable Importance Plot") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Carbohydrate --- logistic
+```{r}
+Carbohydrate_logistic_model <- multinom(Carbohydrate_balance~shellfish+shrimp_crab+seafish+freshwaterfish, data = train_data)
+Carbohydrate_logistic_predictions <- predict(Carbohydrate_logistic_model, newdata = test_data)
+Carbohydrate_conf_matrix_logistic <- confusionMatrix(Carbohydrate_logistic_predictions, test_data$Carbohydrate_balance)
+print(Carbohydrate_conf_matrix_logistic)
+```
+
+Carbohydrate --- logistic (weight)
+```{r}
+train_data$Carbohydrate_weight <- 1
+for (i in 1:nrow(train_data)){ 
+   if (train_data$Carbohydrate_balance[i] == "High") {
+    train_data$Carbohydrate_weight[i]<- 6.5
+   }
+   if (train_data$Carbohydrate_balance[i] == "Low") {
+    train_data$Carbohydrate_weight[i]<- 2
+  }
+} 
+Carbohydrate_logistic_model <- multinom(Carbohydrate_balance~shellfish+shrimp_crab+seafish+freshwaterfish, data = train_data, weight =train_data$Carbohydrate_weight)
+Carbohydrate_logistic_predictions <- predict(Carbohydrate_logistic_model, newdata = test_data)
+Carbohydrate_conf_matrix_logistic <- confusionMatrix(Carbohydrate_logistic_predictions, test_data$Carbohydrate_balance)
+print(Carbohydrate_conf_matrix_logistic)
+```
+
+Carbohydrate --- Naive Bayes
+```{r}
+Carbohydrate_naive_bayes <- naiveBayes(Carbohydrate_balance ~ shellfish + shrimp_crab + seafish + freshwaterfish, data = train_data)
+Carbohydrate_nb_predictions <- predict(Carbohydrate_naive_bayes, newdata = test_data)
+Carbohydrate_conf_matrix <- confusionMatrix(Carbohydrate_nb_predictions, test_data$Carbohydrate_balance)
+print(Carbohydrate_conf_matrix)
+```
+
+Carbohydrate --- SVM
+```{r}
+Carbohydrate_weights <- c(Balance = 1, High = 6.5, Low = 2)
+Carbohydrate_svm_model <- svm(Carbohydrate_balance ~ shellfish+shrimp_crab+seafish+freshwaterfish, data = train_data, kernel = "radial", type = "C-classification",class.weights = Carbohydrate_weights)
+Carbohydrate_svm_predictions <- predict(Carbohydrate_svm_model, newdata = test_data)
+Carbohydrate_svm_accuracy <- sum(Carbohydrate_svm_predictions == test_data$Carbohydrate_balance) / nrow(test_data)
+confusionMatrix(Carbohydrate_svm_predictions,test_data$Carbohydrate_balance)
+```
+
+
+
+
+Fat---Random Forest
+```{r}
+train_data$Fat_balance<-as.factor(train_data$Fat_balance)
+test_data$Fat_balance<-as.factor(test_data$Fat_balance)
+rf_model_Fat<- randomForest(Fat_balance ~ shellfish+shrimp_crab+seafish+freshwaterfish,data=train_data,ntree = 50, mtry = 3)
+predictions_Fat <- predict(rf_model_Fat, newdata = test_data)
+conf_matrix_Fat <- confusionMatrix(predictions_Fat, test_data$Fat_balance)
+print(conf_matrix_Fat)
+```
+
+Fat---Random Forest plot
+```{r}
+Fat_var_imp <- randomForest::importance(rf_model_Fat)
+Fat_var_imp_df <- data.frame(Variables = rownames(Fat_var_imp), Importance = Fat_var_imp[, 1])
+ggplot(Fat_var_imp_df, aes(x = reorder(Variables, -Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Fat Variable Plot") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Fat---Logistic 
+```{r}
+Fat_logistic_model <- multinom(Fat_balance~shellfish+shrimp_crab+seafish+freshwaterfish, data = train_data)
+Fat_logistic_predictions <- predict(Fat_logistic_model, newdata = test_data)
+Fat_conf_matrix_logistic <- confusionMatrix(Fat_logistic_predictions, test_data$Fat_balance)
+Fat_logistic_model
+print(Fat_conf_matrix_logistic)
+```
+
+Fat---Logistic (class weight)
+```{r}
+Fat_weight_value <- table(sub_df$Fat_balance)
+train_data$Fat_weight <- nrow(sub_df) / (3*Fat_weight_value[1])
+for (i in 1:nrow(train_data)){ 
+   if (train_data$Fat_balance[i] == "High") {
+    train_data$Fat_weight[i]<- nrow(sub_df) / (3*Fat_weight_value[2])
+   }
+   if (train_data$Fat_balance[i] == "Low") {
+    train_data$Fat_weight[i]<- nrow(sub_df) / (3*Fat_weight_value[3])
+  }
+} 
+Fat_logistic_model <- multinom(Fat_balance~shellfish+shrimp_crab+seafish+freshwaterfish, data = train_data,weight =train_data$Fat_weight)
+Fat_logistic_predictions <- predict(Fat_logistic_model, newdata = test_data)
+Fat_conf_matrix_logistic <- confusionMatrix(Fat_logistic_predictions, test_data$Fat_balance)
+Fat_logistic_model
+print(Fat_conf_matrix_logistic)
+```
+
+Fat --- Naive Bayes
+```{r}
+Fat_naive_bayes <- naiveBayes(Fat_balance ~ shellfish+shrimp_crab+seafish+freshwaterfish,data = train_data)
+Fat_nb_predictions <- predict(Fat_naive_bayes, newdata = test_data)
+Fat_conf_matrix <- confusionMatrix(Fat_nb_predictions, test_data$Fat_balance)
+print(Fat_conf_matrix)
+```
+
+Fat --- SVM
+```{r}
+Fat_weights <- c(Balance = 0.81, High = 0.78, Low = 2)
+Fat_svm_model <- svm(Fat_balance ~ shellfish+shrimp_crab+seafish+freshwaterfish, data = train_data, kernel = "radial", type = "C-classification",class.weights = Fat_weights)
+Fat_svm_predictions <- predict(Fat_svm_model, newdata = test_data)
+Fat_svm_accuracy <- sum(Fat_svm_predictions == test_data$Fat_balance) / nrow(test_data)
+confusionMatrix(Fat_svm_predictions,test_data$Fat_balance)
+```
+
+
+
+
+Zinc --- Random Forest
+```{r}
+train_data$Zinc_balance<-as.factor(train_data$Zinc_balance)
+test_data$Zinc_balance<-as.factor(test_data$Zinc_balance)
+rf_model_Zinc<- randomForest(Zinc_balance ~ shellfish+shrimp_crab + seafish + freshwaterfish, data=train_data,ntree = 50, mtry = 2)
+predictions_Zinc <- predict(rf_model_Zinc, newdata = test_data)
+conf_matrix_Zinc <- confusionMatrix(predictions_Zinc, test_data$Zinc_balance)
+print(conf_matrix_Zinc)
+```
+
+Zinc -- Random Forest plot
+```{r,warning=FALSE}
+var_imp <- randomForest::importance(rf_model_Zinc)
+var_imp_df <- data.frame(Variables = rownames(var_imp), Importance = var_imp[, 1])
+
+ggplot(var_imp_df, aes(x = reorder(Variables, -Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Variable Importance Plot") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Zinc---Logistic
+```{r}
+Zinc_logistic_model <- multinom(Zinc_balance~shrimp_crab+freshwaterfish, data = train_data, weight =train_data$Zinc_weight)
+Zinc_logistic_predictions <- predict(Zinc_logistic_model, newdata = test_data)
+Zinc_conf_matrix_logistic <- confusionMatrix(Zinc_logistic_predictions, test_data$Zinc_balance)
+print(Zinc_conf_matrix_logistic)
+Zinc_logistic_model
+```
+
+Zinc --- logistic regression (weight)
+```{r}
+Zinc_weight_value <- table(sub_df$Zinc_balance)
+train_data$Zinc_weight <- nrow(sub_df) / (3*Zinc_weight_value[1])
+for (i in 1:nrow(train_data)){ 
+   if (train_data$Zinc_balance[i] == "High") {
+    train_data$Zinc_weight[i]<- nrow(sub_df) / (3*Zinc_weight_value[2])
+   }
+   if (train_data$Zinc_balance[i] == "Low") {
+    train_data$Zinc_weight[i]<- nrow(sub_df) / (3*Zinc_weight_value[3])
+  }
+} 
+Zinc_logistic_model <- multinom(Zinc_balance ~ shrimp_crab+seafish+freshwaterfish+shellfish, data = train_data, weight = train_data$Zinc_weight)
+Zinc_logistic_predictions <- predict(Zinc_logistic_model, newdata = test_data)
+Zinc_conf_matrix_logistic <- confusionMatrix(Zinc_logistic_predictions, test_data$Zinc_balance)
+print(Zinc_conf_matrix_logistic)
+sum(Zinc_logistic_predictions==test_data$Zinc_balance)/(nrow(test_data))
+Zinc_logistic_model
+```
+
+Zinc --- Naive Bayes
+```{r}
+Zinc_naive_bayes <- naiveBayes(Zinc_balance ~ shellfish+shrimp_crab+seafish+freshwaterfish,data = train_data)
+Zinc_nb_predictions <- predict(Zinc_naive_bayes, newdata = test_data)
+Zinc_conf_matrix <- confusionMatrix(Zinc_nb_predictions, test_data$Zinc_balance)
+print(Zinc_conf_matrix)
+print(Zinc_naive_bayes)
+```
+
+Zinc --- Support Vector Machine 
+```{r}
+Zinc_weights <- c(Balance = 0.6109529, High = 3.561385 , Low = 0.9238532)
+Zinc_svm_model <- svm(Zinc_balance ~ shellfish+shrimp_crab+seafish+freshwaterfish, data = train_data, kernel = "radial", type = "C-classification",class.weights = Zinc_weights)
+Zinc_svm_predictions <- predict(Zinc_svm_model, newdata = test_data)
+confusionMatrix(Zinc_svm_predictions,test_data$Zinc_balance)
+```
+
+
+
+
+
+Calcium --- Random Forest
+```{r}
+train_data$Calcium_balance<-as.factor(train_data$Calcium_balance)
+test_data$Calcium_balance<-as.factor(test_data$Calcium_balance)
+rf_model_Calcium<- randomForest(Calcium_balance ~ shellfish+shrimp_crab+seafish+freshwaterfish,data=train_data,ntree = 50, mtry = 4)
+predictions_Calcium <- predict(rf_model_Calcium, newdata = test_data)
+conf_matrix_Calcium <- confusionMatrix(predictions_Calcium, test_data$Calcium_balance)
+print(conf_matrix_Calcium)
+```
+
+Calcium --- Random Forest Plot
+```{r}
+Calcium_var_imp <- randomForest::importance(rf_model_Calcium)
+Calcium_var_imp_df <- data.frame(Variables = rownames(Calcium_var_imp), Importance = Calcium_var_imp[, 1])
+
+# Plot variable importance
+ggplot(Calcium_var_imp_df, aes(x = reorder(Variables, -Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Calcium Variable Plot") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Calcium --- logistic Regression 
+```{r}
+Calcium_logistic_model <- multinom(Calcium_balance~shellfish+shrimp_crab+seafish+freshwaterfish, data = train_data)
+Calcium_logistic_predictions <- predict(Calcium_logistic_model, newdata = test_data)
+Calcium_conf_matrix_logistic <- confusionMatrix(Calcium_logistic_predictions, test_data$Calcium_balance)
+Calcium_conf_matrix_logistic
+Calcium_logistic_model
+```
+
+Calcium --- logistic Regression (weight)
+```{r}
+Calcium_weight_value <- table(sub_df$Calcium_balance)
+train_data$Calcium_weight <- nrow(sub_df) / (3*Calcium_weight_value[1])
+for (i in 1:nrow(train_data)){ 
+   if (train_data$Calcium_balance[i] == "High") {
+    train_data$Calcium_weight[i]<- nrow(sub_df) / (3*Calcium_weight_value[2])
+   }
+   if (train_data$Calcium_balance[i] == "Low") {
+    train_data$Calcium_weight[i]<- nrow(sub_df) / (3*Calcium_weight_value[3])
+  }
+} 
+Calcium_logistic_model <- multinom(Calcium_balance~shellfish+shrimp_crab+seafish+freshwaterfish, data = train_data, weight =train_data$Calcium_weight)
+Calcium_logistic_predictions <- predict(Calcium_logistic_model, newdata = test_data)
+Calcium_conf_matrix_logistic <- confusionMatrix(Calcium_logistic_predictions, test_data$Calcium_balance)
+Calcium_conf_matrix_logistic
+Calcium_logistic_model
+```
+
+Calcium --- Naive Bayes
+```{r}
+Calcium_naive_bayes <- naiveBayes(Calcium_balance ~ shellfish+shrimp_crab+seafish+freshwaterfish,data = train_data)
+Calcium_nb_predictions <- predict(Calcium_naive_bayes, newdata = test_data)
+Calcium_conf_matrix <- confusionMatrix(Calcium_nb_predictions, test_data$Calcium_balance)
+Calcium_naive_bayes
+Calcium_conf_matrix
+```
+
+Calcium --- SVM
+```{r}
+Calcium_weights <- c(Balance = 0.65, High = 16.07, Low = 0.71)
+Calcium_svm_model <- svm(Calcium_balance ~ shellfish+shrimp_crab+seafish+freshwaterfish, data = train_data, kernel = "radial", type = "C-classification",class.weights = Calcium_weights)
+Calcium_svm_predictions <- predict(Calcium_svm_model, newdata = test_data)
+Calcium_svm_accuracy <- sum(Calcium_svm_predictions == test_data$Calcium_balance) / nrow(test_data)
+table(Calcium_svm_predictions,test_data$Calcium_balance)
+print(Calcium_svm_accuracy)
+```
+
+
+
+
+Iron --- Random Forest
+```{r}
+train_data$Iron_balance<-as.factor(train_data$Iron_balance)
+test_data$Iron_balance<-as.factor(test_data$Iron_balance)
+rf_model_Iron<- randomForest(Iron_balance ~ shellfish+shrimp_crab+seafish+freshwaterfish,data=train_data,ntree = 50, mtry = 4)
+predictions_Iron <- predict(rf_model_Iron, newdata = test_data)
+conf_matrix_Iron <- table(predictions_Iron, test_data$Iron_balance)
+print(conf_matrix_Iron)
+correct_predictions <- sum(diag(conf_matrix_Iron))
+total_predictions <- sum(conf_matrix_Iron)
+accuracy <- correct_predictions / total_predictions
+print(paste("Accuracy:", accuracy))
+```
+
+Iron -- Random Forest plot
+```{r,warning=FALSE}
+var_imp <- randomForest::importance(rf_model_Iron)
+var_imp_df <- data.frame(Variables = rownames(var_imp), Importance = var_imp[, 1])
+
+ggplot(var_imp_df, aes(x = reorder(Variables, -Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Variable Importance Plot") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+Iron --- logistic 
+```{r}
+Iron_logistic_model <- multinom(Iron_balance~shellfish+shrimp_crab+seafish+freshwaterfish, data = train_data)
+Iron_logistic_predictions <- predict(Iron_logistic_model, newdata = test_data)
+Iron_conf_matrix_logistic <- table(Iron_logistic_predictions, test_data$Iron_balance)
+print(Iron_conf_matrix_logistic)
+Iron_logistic_model
+sum(Iron_logistic_predictions==test_data$Iron_balance)/(nrow(test_data))
+```
+
+Iron --- logistic (weight)
+```{r}
+Iron_weight_value <- table(sub_df$Iron_balance)
+train_data$Iron_weight <- nrow(sub_df) / (3*Iron_weight_value[1])
+for (i in 1:nrow(train_data)){ 
+   if (train_data$Iron_balance[i] == "High") {
+    train_data$Iron_weight[i]<- nrow(sub_df) / (3*Iron_weight_value[2])
+   }
+   if (train_data$Iron_balance[i] == "Low") {
+    train_data$Iron_weight[i]<- nrow(sub_df) / (3*Iron_weight_value[3])
+  }
+} 
+Iron_logistic_model <- multinom(Iron_balance~shellfish+shrimp_crab+seafish+freshwaterfish, data = train_data, weight =train_data$Iron_weight)
+Iron_logistic_predictions <- predict(Iron_logistic_model, newdata = test_data)
+Iron_conf_matrix_logistic <- table(Iron_logistic_predictions, test_data$Iron_balance)
+print(Iron_conf_matrix_logistic)
+Iron_logistic_model
+sum(Iron_logistic_predictions==test_data$Iron_balance)/(nrow(test_data))
+```
+
+Iron --- Naive Bayes
+```{r}
+Iron_naive_bayes <- naiveBayes(Iron_balance ~ shellfish+shrimp_crab+seafish+freshwaterfish,data = train_data)
+Iron_nb_predictions <- predict(Iron_naive_bayes, newdata = test_data)
+Iron_conf_matrix <- confusionMatrix(Iron_nb_predictions, test_data$Iron_balance)
+print(Iron_conf_matrix)
+```
+
+Iron --- SVM
+```{r}
+Iron_weights <- c(Balance = 1, High = 6.5, Low = 2)
+Iron_svm_model <- svm(Iron_balance ~ shellfish+shrimp_crab+seafish+freshwaterfish, data = train_data, kernel = "radial", type = "C-classification",class.weights = Iron_weights)
+Iron_svm_predictions <- predict(Iron_svm_model, newdata = test_data)
+Iron_svm_accuracy <- sum(Iron_svm_predictions == test_data$Iron_balance) / nrow(test_data)
+confusionMatrix(Iron_svm_predictions,test_data$Iron_balance)
+print(Iron_svm_accuracy)
+```
+
+
+
+Potassium --- Random Forest
+```{r}
+train_data$Potassium_balance<-as.factor(train_data$Potassium_balance)
+test_data$Potassium_balance<-as.factor(test_data$Potassium_balance)
+rf_model_Potassium<- randomForest(Potassium_balance ~ shellfish+shrimp_crab+seafish+freshwaterfish,data=train_data,ntree = 50, mtry = 4)
+predictions_Potassium <- predict(rf_model_Potassium, newdata = test_data)
+conf_matrix_Potassium <- table(predictions_Potassium, test_data$Potassium_balance)
+print(conf_matrix_Potassium)
+correct_predictions <- sum(diag(conf_matrix_Potassium))
+total_predictions <- sum(conf_matrix_Potassium)
+accuracy <- correct_predictions / total_predictions
+print(paste("Accuracy:", accuracy))
+```
+
+Potassium -- Random Forest plot
+```{r,warning=FALSE}
+var_imp <- randomForest::importance(rf_model_Potassium)
+var_imp_df <- data.frame(Variables = rownames(var_imp), Importance = var_imp[, 1])
+
+ggplot(var_imp_df, aes(x = reorder(Variables, -Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Variable Importance Plot") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+Potassium --- logistic 
+```{r}
+train_data$Potassium_weight <- 1
+for (i in 1:nrow(train_data)){ 
+   if (train_data$Potassium_balance[i] == "High") {
+    train_data$Potassium_weight[i]<- 6.5
+   }
+   if (train_data$Potassium_balance[i] == "Low") {
+    train_data$Potassium_weight[i]<- 2
+  }
+} 
+Potassium_logistic_model <- multinom(Potassium_balance~shellfish+shrimp_crab+seafish+freshwaterfish, data = train_data, weight =train_data$Potassium_weight)
+Potassium_logistic_predictions <- predict(Potassium_logistic_model, newdata = test_data)
+Potassium_conf_matrix_logistic <- table(Potassium_logistic_predictions, test_data$Potassium_balance)
+print(Potassium_conf_matrix_logistic)
+sum(Potassium_logistic_predictions==test_data$Potassium_balance)/(nrow(test_data))
+```
+
+Potassium --- Naive Bayes
+```{r}
+Potassium_naive_bayes <- naiveBayes(Potassium_balance ~ shellfish+shrimp_crab+seafish+freshwaterfish,data = train_data)
+Potassium_nb_predictions <- predict(Potassium_naive_bayes, newdata = test_data)
+Potassium_conf_matrix <- table(Potassium_nb_predictions, test_data$Potassium_balance)
+sum(diag(Potassium_conf_matrix)) / sum(Potassium_conf_matrix)
+print(Potassium_conf_matrix)
+```
+
+Potassium --- SVM
+```{r}
+Potassium_weights <- c(Balance = 1, High = 6.5, Low = 2)
+Potassium_svm_model <- svm(Potassium_balance ~ shellfish+shrimp_crab+seafish+freshwaterfish, data = train_data, kernel = "radial", type = "C-classification",class.weights = Potassium_weights)
+Potassium_svm_predictions <- predict(Potassium_svm_model, newdata = test_data)
+Potassium_svm_accuracy <- sum(Potassium_svm_predictions == test_data$Potassium_balance) / nrow(test_data)
+table(Potassium_svm_predictions,test_data$Potassium_balance)
+print(Potassium_svm_accuracy)
+```
+
+
+
+Fiber --- Random Forest
+```{r}
+train_data$Fiber_balance<-as.factor(train_data$Fiber_balance)
+test_data$Fiber_balance<-as.factor(test_data$Fiber_balance)
+rf_model_Fiber<- randomForest(Fiber_balance ~ shellfish+shrimp_crab+seafish+freshwaterfish,data=train_data,ntree = 50, mtry = 4)
+predictions_Fiber <- predict(rf_model_Fiber, newdata = test_data)
+conf_matrix_Fiber <- table(predictions_Fiber, test_data$Fiber_balance)
+print(conf_matrix_Fiber)
+accuracy_Fiber <- sum(diag(conf_matrix_Fiber)) / sum(conf_matrix_Fiber)
+print(paste("Accuracy:", accuracy_Fiber))
+```
+
+Fiber -- Random Forest plot
+```{r,warning=FALSE}
+var_imp <- randomForest::importance(rf_model_Fiber)
+var_imp_df <- data.frame(Variables = rownames(var_imp), Importance = var_imp[, 1])
+
+ggplot(var_imp_df, aes(x = reorder(Variables, -Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Variable Importance Plot") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+Fiber --- logistic 
+```{r}
+train_data$Fiber_weight <- 1
+for (i in 1:nrow(train_data)){ 
+   if (train_data$Fiber_balance[i] == "High") {
+    train_data$Fiber_weight[i]<- 6.5
+   }
+   if (train_data$Fiber_balance[i] == "Low") {
+    train_data$Fiber_weight[i]<- 2
+  }
+} 
+Fiber_logistic_model <- multinom(Fiber_balance~shellfish+shrimp_crab+seafish+freshwaterfish, data = train_data, weight =train_data$Fiber_weight)
+Fiber_logistic_predictions <- predict(Fiber_logistic_model, newdata = test_data)
+Fiber_conf_matrix_logistic <- table(Fiber_logistic_predictions, test_data$Fiber_balance)
+print(Fiber_conf_matrix_logistic)
+sum(Fiber_logistic_predictions==test_data$Fiber_balance)/(nrow(test_data))
+```
+
+Fiber --- Naive Bayes
+```{r}
+Fiber_naive_bayes <- naiveBayes(Fiber_balance ~ shellfish+shrimp_crab+seafish+freshwaterfish,data = train_data)
+Fiber_nb_predictions <- predict(Fiber_naive_bayes, newdata = test_data)
+Fiber_conf_matrix <- table(Fiber_nb_predictions, test_data$Fiber_balance)
+sum(diag(Fiber_conf_matrix)) / sum(Fiber_conf_matrix)
+print(Fiber_conf_matrix)
+```
+
+Fiber --- SVM
+```{r}
+Fiber_weights <- c(Balance = 1, High = 6.5, Low = 2)
+Fiber_svm_model <- svm(Fiber_balance ~ shellfish+shrimp_crab+seafish+freshwaterfish, data = train_data, kernel = "radial", type = "C-classification",class.weights = Fiber_weights)
+Fiber_svm_predictions <- predict(Fiber_svm_model, newdata = test_data)
+Fiber_svm_accuracy <- sum(Fiber_svm_predictions == test_data$Fiber_balance) / nrow(test_data)
+table(Fiber_svm_predictions,test_data$Fiber_balance)
+print(Fiber_svm_accuracy)
+```
+
+
+
